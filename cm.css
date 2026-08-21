@@ -1,5 +1,16 @@
 html, body {
-    margin: 0;
-    overflow: hidden;
-    background: #252525;
+	background-color: #141a24;
+	margin: 0;
+	padding: 0;
+	width: 100%;
+	height: 100%;
+	overflow: hidden;
+
+	display: flex;
+	justify-content: center;
+	align-items: center;
+}
+
+canvas {
+	display: block;
 }
