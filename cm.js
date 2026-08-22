@@ -1,16 +1,17 @@
-const fps = 60;
-const COLLISION_PADDING = 20;
 const BACKGROUND = "#252525";
-const playerColor = "#ff5050";
-const carColor = "#5050ff";
 
-const playerSize = 32;
-const PLAYER_SPEED = 5;
+const COLLISION_PADDING = 20;
 
-const buttonX = 300;
-const buttonY = 300;
-const buttonWidth = 150;
-const buttonHeight = 40;
+const PLAYER_SPEED = 300; // pixels per second
+const DEBUG_COLLISIONS = true;
+const DEBUG = true;
+
+const CANVAS_WIDTH = 1600;
+const CANVAS_HEIGHT = 900;
+
+// ========================================
+// ASSETS
+// ========================================
 
 const playerSprite = new Image();
 playerSprite.src = "images/player.png";
@@ -18,479 +19,813 @@ playerSprite.src = "images/player.png";
 const carSprite = new Image();
 carSprite.src = "images/car.png";
 
-
 const backgroundSprite = new Image();
 backgroundSprite.src = "images/background.png";
 
-const hitSound = new Audio("sounds/hit.wav");
 
-let touchingCar = false;
-let touchingWall = false;
-let interacting = false;
+// ========================================
+// GAME STATE
+// ========================================
+
 let gameState = "walking";
 
-let playerPosition = {
-	x: 350,
-	y: 364,
-	width: 96,
-	height: 96
-};
+// ========================================
+// INPUT
+// ========================================
 
-let car = {
-	x: game.width / 2,
-	y: game.height / 2,
-	width: 190,
-	height: 315,
-	engine: 40,
-	battery: 100,
-	tires: 70,
-	oil: 10
-};
-const collisionObjects = [
+const keys = {};
 
-	// Outer walls
-	{ x: 235, y: 10, width: 1132, height: 95, name: "top wall" },
-	{ x: 235, y: 790, width: 1132, height: 0, name: "bottom wall" },
-	{ x: 215, y: 85, width: 0, height: 685, name: "left wall" },
-	{ x: 1381, y: 89, width: 0, height: 680, name: "right wall" },
+document.addEventListener("keydown", (e) => {
+    const key = e.key.toLowerCase();
 
-	// Workbench
-	{ x: 275, y: 50, width: 198, height: 115, name: "workbench" },
+    keys[key] = true;
 
-	// Blue tool cabinet
-	{ x: 530, y: 83, width: 49, height: 75, name: "tool cabinet" },
+    // Prevent the page from scrolling with movement keys
+    if (
+        key === "w" ||
+        key === "a" ||
+        key === "s" ||
+        key === "d" ||
+        key === "e" ||
+        key === "escape"
+    ) {
+        e.preventDefault();
+    }
 
-	// Shelving
-	{ x: 1075, y: 69, width: 145, height: 105, name: "shelf" },
+    // Interaction
+    if (key === "e" && !e.repeat) {
 
-	// Red hydraulic jack
-	{ x: 1285, y: 145-95, width: 40, height: 110, name: "jack" },
+        if (gameState === "walking" && nearCar()) {
+            gameState = "repairing";
+            return;
+        }
+    }
 
-	// Tires
-	{ x: 255, y: 700, width: 75, height: 50, name: "tires" },
-
-	// Red toolbox
-	{ x: 371, y: 680, width: 46, height: 55, name: "toolbox" },
-
-	// Bottom garage door
-	{ x: 587, y: 750, width: 430, height: 110, name: "garage door" }
-];
-
-let previousX = playerPosition.x;
-let previousY = playerPosition.y;
-
-let lastMoveX = 0;
-let lastMoveY = 0;
-
-let menuX = 0;
-let menuY = 0;
-let menuWidth = 320;
-let menuHeight = 260;
-
-let mouseX = 0;
-let mouseY = 0;
-
-game.addEventListener("mousemove", (e) => {
-	const rect = game.getBoundingClientRect();
-
-	mouseX = e.clientX - rect.left;
-	mouseY = e.clientY - rect.top;
+    // Close repair menu
+    if (key === "escape") {
+        gameState = "walking";
+    }
 });
 
-game.addEventListener("click", () => {
-
-	if (
-		gameState === "repairing" &&
-		mouseX > menuX &&
-		mouseX < menuX + menuWidth &&
-		mouseY > menuY &&
-		mouseY < menuY + buttonHeight
-	) {
-		repairEngine();
-	}
+document.addEventListener("keyup", (e) => {
+    keys[e.key.toLowerCase()] = false;
 });
+
+// ========================================
+// CANVAS
+// ========================================
 
 function resizeCanvas() {
-	game.width = 1600;
-	game.height = 900;
+    game.width = CANVAS_WIDTH;
+    game.height = CANVAS_HEIGHT;
 
-	centerCar();
+    updateMenuPosition();
+    centerCar();
 }
-
-function centerCar() {
-	car.x = game.width / 2;
-	car.y = game.height / 2;
-}
-
-resizeCanvas();
-window.addEventListener("resize", resizeCanvas);
 
 const ctx = game.getContext("2d");
 
 ctx.imageSmoothingEnabled = false;
 
-document.addEventListener("keyup", (e) => {
+// ========================================
+// PLAYER
+// ========================================
 
-	if (e.key === "e" && gameState === "walking") {
-		interacting = false;
-	}
-});
+const playerPosition = {
+    x: 350,
+    y: 364,
+    width: 96,
+    height: 96
+};
 
-document.addEventListener("keydown", (e) => {
+let previousX = playerPosition.x;
+let previousY = playerPosition.y;
 
-	if (gameState === "walking") {
+// ========================================
+// CAR
+// ========================================
 
-		previousX = playerPosition.x;
-		previousY = playerPosition.y;
+const car = {
+    x: CANVAS_WIDTH / 2,
+    y: CANVAS_HEIGHT / 2,
+    width: 190,
+    height: 315,
 
-		lastMoveX = 0;
-		lastMoveY = 0;
+    engine: 40,
+    battery: 100,
+    tires: 70,
+    oil: 10
+};
 
-		if (e.key === "w") {
-			playerPosition.y -= PLAYER_SPEED;
-			lastMoveY = -1;
-		}
-
-		if (e.key === "s") {
-			playerPosition.y += PLAYER_SPEED;
-			lastMoveY = 1;
-		}
-
-		if (e.key === "a") {
-			playerPosition.x -= PLAYER_SPEED;
-			lastMoveX = -1;
-		}
-
-		if (e.key === "d") {
-			playerPosition.x += PLAYER_SPEED;
-			lastMoveX = 1;
-		}
-	}
-
-	if (e.key === "e") {
-
-		if (nearCar()) {
-			interacting = true;
-			gameState = "repairing";
-		}
-	}
-
-	if (e.key === "Escape") {
-		gameState = "walking";
-		interacting = false;
-	}
-});
-
-function nearCar() {
-
-	const distanceX = Math.abs(playerPosition.x - car.x);
-	const distanceY = Math.abs(playerPosition.y - car.y);
-
-	return (
-		distanceX < car.width / 2 + 64 &&
-		distanceY < car.height / 2 + 64
-	);
+function centerCar() {
+    car.x = game.width / 2;
+    car.y = game.height / 2;
 }
 
-function knockback(what) {
+// ========================================
+// COLLISION OBJECTS
+// ========================================
 
-	if (what === "car") {
+const collisionObjects = [
 
-		playerPosition.x = previousX;
-		playerPosition.y = previousY;
+    // Outer walls
+    {
+        x: 235,
+        y: 10,
+        width: 1132,
+        height: 95,
+        name: "top wall"
+    },
 
-	} else if (what === "wall") {
+    {
+        x: 235,
+        y: 790,
+        width: 1132,
+        height: 20,
+        name: "bottom wall"
+    },
 
-		playerPosition.x -= lastMoveX * 50;
-		playerPosition.y -= lastMoveY * 50;
+    {
+        x: 215,
+        y: 85,
+        width: 20,
+        height: 685,
+        name: "left wall"
+    },
 
-		hitSound.currentTime = 0;
-		hitSound.play();
-	}
+    {
+        x: 1381,
+        y: 89,
+        width: 20,
+        height: 680,
+        name: "right wall"
+    },
+
+    // Workbench
+    {
+        x: 275,
+        y: 50,
+        width: 198,
+        height: 115,
+        name: "workbench"
+    },
+
+    // Blue tool cabinet
+    {
+        x: 530,
+        y: 83,
+        width: 49,
+        height: 75,
+        name: "tool cabinet"
+    },
+
+    // Shelving
+    {
+        x: 1075,
+        y: 69,
+        width: 145,
+        height: 105,
+        name: "shelf"
+    },
+
+    // Red hydraulic jack
+    {
+        x: 1285,
+        y: 145 - 95,
+        width: 40,
+        height: 110,
+        name: "jack"
+    },
+
+    // Tires
+    {
+        x: 255,
+        y: 700,
+        width: 75,
+        height: 50,
+        name: "tires"
+    },
+
+    // Red toolbox
+    {
+        x: 371,
+        y: 680,
+        width: 46,
+        height: 55,
+        name: "toolbox"
+    },
+
+    // Bottom garage door
+    {
+        x: 587,
+        y: 750,
+        width: 430,
+        height: 110,
+        name: "garage door"
+    }
+];
+
+// ========================================
+// REPAIR MENU
+// ========================================
+
+const menuWidth = 320;
+const menuHeight = 260;
+
+const buttonHeight = 40;
+
+let menuX = 0;
+let menuY = 0;
+
+function updateMenuPosition() {
+    menuX = game.width / 2 - menuWidth / 2;
+    menuY = game.height / 2 - menuHeight / 2;
 }
 
+// ========================================
+// MOUSE
+// ========================================
+
+let mouseX = 0;
+let mouseY = 0;
+
+game.addEventListener("mousemove", (e) => {
+    const rect = game.getBoundingClientRect();
+
+    mouseX = e.clientX - rect.left;
+    mouseY = e.clientY - rect.top;
+});
+
+game.addEventListener("click", () => {
+
+    if (gameState !== "repairing") {
+        return;
+    }
+
+    const buttonX = menuX;
+    const buttonY = menuY;
+
+    const insideButton =
+        mouseX >= buttonX &&
+        mouseX <= buttonX + menuWidth &&
+        mouseY >= buttonY &&
+        mouseY <= buttonY + buttonHeight;
+
+    if (insideButton) {
+        repairEngine();
+    }
+});
+
+// ========================================
+// COLLISION HELPERS
+// ========================================
+
+function getPlayerBounds(player) {
+
+    return {
+        left: player.x - player.width / 2,
+        right: player.x + player.width / 2,
+        top: player.y - player.height / 2,
+        bottom: player.y + player.height / 2
+    };
+}
+
+function getCarBounds(car) {
+
+    return {
+        left: car.x - car.width / 2,
+        right: car.x + car.width / 2,
+        top: car.y - car.height / 2,
+        bottom: car.y + car.height / 2
+    };
+}
 
 function touchingObject(player, object) {
 
-	const objectLeft =
-		object.x - COLLISION_PADDING;
+    const objectLeft =
+        object.x - COLLISION_PADDING;
 
-	const objectRight =
-		object.x + object.width + COLLISION_PADDING;
+    const objectRight =
+        object.x + object.width + COLLISION_PADDING;
 
-	const objectTop =
-		object.y - COLLISION_PADDING;
+    const objectTop =
+        object.y - COLLISION_PADDING;
 
-	const objectBottom =
-		object.y + object.height + COLLISION_PADDING;
+    const objectBottom =
+        object.y + object.height + COLLISION_PADDING;
 
-	const playerLeft =
-		player.x - player.width / 2;
+    const playerBounds = getPlayerBounds(player);
 
-	const playerRight =
-		player.x + player.width / 2;
-
-	const playerTop =
-		player.y - player.height / 2;
-
-	const playerBottom =
-		player.y + player.height / 2;
-
-	return (
-		playerRight > objectLeft &&
-		playerLeft < objectRight &&
-		playerBottom > objectTop &&
-		playerTop < objectBottom
-	);
+    return (
+        playerBounds.right > objectLeft &&
+        playerBounds.left < objectRight &&
+        playerBounds.bottom > objectTop &&
+        playerBounds.top < objectBottom
+    );
 }
 
-function touching(player, car) {
+function touchingCar(player, car) {
 
-	const collided =
-		player.x + player.width / 2 > car.x - car.width / 2 &&
-		player.x - player.width / 2 < car.x + car.width / 2 &&
-		player.y + player.height / 2 > car.y - car.height / 2 &&
-		player.y - player.height / 2 < car.y + car.height / 2;
+    const playerBounds = getPlayerBounds(player);
+    const carBounds = getCarBounds(car);
 
-	if (collided) {
-		knockback("car");
-	}
-
-	return collided;
+    return (
+        playerBounds.right > carBounds.left &&
+        playerBounds.left < carBounds.right &&
+        playerBounds.bottom > carBounds.top &&
+        playerBounds.top < carBounds.bottom
+    );
 }
+
+// ========================================
+// COLLISION CHECK
+// ========================================
 
 function checkCollisions() {
 
-	for (const object of collisionObjects) {
+    // Static collision objects
+    for (const object of collisionObjects) {
 
-		if (touchingObject(playerPosition, object)) {
+        if (touchingObject(playerPosition, object)) {
 
-			playerPosition.x = previousX;
-			playerPosition.y = previousY;
+            playerPosition.x = previousX;
+            playerPosition.y = previousY;
 
-			return true;
-		}
-	}
+            return true;
+        }
+    }
 
-	// Car collision
-	if (touching(playerPosition, car)) {
+    // Car collision
+    if (touchingCar(playerPosition, car)) {
 
-		playerPosition.x = previousX;
-		playerPosition.y = previousY;
+        playerPosition.x = previousX;
+        playerPosition.y = previousY;
 
-		return true;
-	}
+        return true;
+    }
 
-	return false;
+    return false;
 }
 
-function drawCollisionDebug() {
+// ========================================
+// PLAYER MOVEMENT
+// ========================================
 
-	ctx.strokeStyle = "lime";
-	ctx.lineWidth = 2;
+function updatePlayer(dt) {
 
-	for (const object of collisionObjects) {
+    if (gameState !== "walking") {
+        return;
+    }
 
-		ctx.strokeRect(
-			object.x - COLLISION_PADDING,
-			object.y - COLLISION_PADDING,
-			object.width + COLLISION_PADDING * 2,
-			object.height + COLLISION_PADDING * 2
-		);
-	}
+    let dx = 0;
+    let dy = 0;
 
-	// Player hitbox
-	ctx.strokeStyle = "red";
+    if (keys.w) {
+        dy -= 1;
+    }
 
-	ctx.strokeRect(
-		playerPosition.x - playerPosition.width / 2,
-		playerPosition.y - playerPosition.height / 2,
-		playerPosition.width,
-		playerPosition.height
-	);
+    if (keys.s) {
+        dy += 1;
+    }
 
-	// Car hitbox
-	ctx.strokeStyle = "blue";
+    if (keys.a) {
+        dx -= 1;
+    }
 
-	ctx.strokeRect(
-		car.x - car.width / 2,
-		car.y - car.height / 2,
-		car.width,
-		car.height
-	);
+    if (keys.d) {
+        dx += 1;
+    }
+
+    // No movement
+    if (dx === 0 && dy === 0) {
+        return;
+    }
+
+    // Normalize diagonal movement
+    const length = Math.hypot(dx, dy);
+
+    dx /= length;
+    dy /= length;
+
+    const movementX = dx * PLAYER_SPEED * dt;
+    const movementY = dy * PLAYER_SPEED * dt;
+
+    previousX = playerPosition.x;
+    previousY = playerPosition.y;
+
+    // ------------------------------------
+    // Horizontal movement
+    // ------------------------------------
+
+    playerPosition.x += movementX;
+
+    if (checkCollisions()) {
+        playerPosition.x = previousX;
+    }
+
+    // ------------------------------------
+    // Vertical movement
+    // ------------------------------------
+
+    previousX = playerPosition.x;
+    previousY = playerPosition.y;
+
+    playerPosition.y += movementY;
+
+    if (checkCollisions()) {
+        playerPosition.y = previousY;
+    }
 }
+
+// ========================================
+// CAR INTERACTION
+// ========================================
+
+function nearCar() {
+
+    const playerBounds = getPlayerBounds(playerPosition);
+    const carBounds = getCarBounds(car);
+
+    const interactionPadding = 64;
+
+    return (
+        playerBounds.right >
+        carBounds.left - interactionPadding &&
+
+        playerBounds.left <
+        carBounds.right + interactionPadding &&
+
+        playerBounds.bottom >
+        carBounds.top - interactionPadding &&
+
+        playerBounds.top <
+        carBounds.bottom + interactionPadding
+    );
+}
+
+// ========================================
+// REPAIR SYSTEM
+// ========================================
 
 function repairEngine() {
 
-	if (car.engine < 100) {
-		car.engine += 10;
+    if (car.engine >= 100) {
+        return;
+    }
 
-		if (car.engine > 100) {
-			car.engine = 100;
-		}
-	}
+    car.engine += 10;
+
+    if (car.engine > 100) {
+        car.engine = 100;
+    }
 }
+
+// ========================================
+// DRAWING HELPERS
+// ========================================
 
 function clear() {
-	if (backgroundSprite.complete && backgroundSprite.naturalWidth > 0) {
-		ctx.drawImage(
-			backgroundSprite,
-			0,
-			0,
-			game.width,
-			game.height
-		);
-	}
 
+    ctx.fillStyle = BACKGROUND;
+    ctx.fillRect(
+        0,
+        0,
+        game.width,
+        game.height
+    );
+
+    if (
+        backgroundSprite.complete &&
+        backgroundSprite.naturalWidth > 0
+    ) {
+
+        ctx.drawImage(
+            backgroundSprite,
+            0,
+            0,
+            game.width,
+            game.height
+        );
+    }
 }
 
-function drawImageContain(image, x, y, width, height) {
+function drawImageContain(
+    image,
+    x,
+    y,
+    width,
+    height
+) {
 
-	if (!image.complete || image.naturalWidth === 0) {
-		return;
-	}
+    if (
+        !image.complete ||
+        image.naturalWidth === 0
+    ) {
+        return;
+    }
 
-	const imageRatio = image.naturalWidth / image.naturalHeight;
-	const targetRatio = width / height;
+    const imageRatio =
+        image.naturalWidth /
+        image.naturalHeight;
 
-	let drawWidth;
-	let drawHeight;
+    const targetRatio =
+        width / height;
 
-	if (imageRatio > targetRatio) {
+    let drawWidth;
+    let drawHeight;
 
-		drawWidth = width;
-		drawHeight = width / imageRatio;
+    if (imageRatio > targetRatio) {
 
-	} else {
+        drawWidth = width;
+        drawHeight = width / imageRatio;
 
-		drawHeight = height;
-		drawWidth = height * imageRatio;
-	}
+    } else {
 
-	ctx.drawImage(
-		image,
-		x - drawWidth / 2,
-		y - drawHeight / 2,
-		drawWidth,
-		drawHeight
-	);
+        drawHeight = height;
+        drawWidth = height * imageRatio;
+    }
+
+    ctx.drawImage(
+        image,
+        x - drawWidth / 2,
+        y - drawHeight / 2,
+        drawWidth,
+        drawHeight
+    );
 }
 
-function drawPlayer({ x, y, width, height }) {
+// ========================================
+// DRAW PLAYER
+// ========================================
 
-	drawImageContain(
-		playerSprite,
-		x,
-		y,
-		width,
-		height
-	);
+function drawPlayer(player) {
+
+    drawImageContain(
+        playerSprite,
+        player.x,
+        player.y,
+        player.width,
+        player.height
+    );
 }
 
-function drawCar({ x, y, width, height }) {
+// ========================================
+// DRAW CAR
+// ========================================
 
-	drawImageContain(
-		carSprite,
-		x,
-		y,
-		width,
-		height
-	);
+function drawCar(car) {
+
+    drawImageContain(
+        carSprite,
+        car.x,
+        car.y,
+        car.width,
+        car.height
+    );
 }
+
+// ========================================
+// DEBUG COLLISION DRAWING
+// ========================================
+
+function drawCollisionDebug() {
+
+    if (!DEBUG_COLLISIONS) {
+        return;
+    }
+
+    // Static objects
+    ctx.strokeStyle = "lime";
+    ctx.lineWidth = 2;
+
+    for (const object of collisionObjects) {
+
+        ctx.strokeRect(
+            object.x - COLLISION_PADDING,
+            object.y - COLLISION_PADDING,
+            object.width +
+            COLLISION_PADDING * 2,
+            object.height +
+            COLLISION_PADDING * 2
+        );
+    }
+
+    // Player
+    ctx.strokeStyle = "red";
+
+    const playerBounds =
+        getPlayerBounds(playerPosition);
+
+    ctx.strokeRect(
+        playerBounds.left,
+        playerBounds.top,
+        playerPosition.width,
+        playerPosition.height
+    );
+
+    // Car
+    ctx.strokeStyle = "blue";
+
+    const carBounds = getCarBounds(car);
+
+    ctx.strokeRect(
+        carBounds.left,
+        carBounds.top,
+        car.width,
+        car.height
+    );
+}
+
+// ========================================
+// HUD
+// ========================================
 
 function drawHUD() {
 
-	ctx.fillStyle = "#000000dd";
+    // Menu background
+    ctx.fillStyle = "#000000dd";
 
-	ctx.fillStyle = "#ffffff";
+    ctx.fillRect(
+        menuX,
+        menuY,
+        menuWidth,
+        menuHeight
+    );
 
-	ctx.font = "bold 20px 'Press Start 2P', monospace";
-	ctx.textBaseline = "middle";
+    ctx.fillStyle = "#ffffff";
 
-	ctx.fillText(
-		"ENGINE " + car.engine + "%",
-		menuX + 20,
-		menuY + 70
-	);
+    ctx.font =
+        "bold 20px 'Press Start 2P', monospace";
 
-	ctx.fillText(
-		"BATTERY " + car.battery + "%",
-		menuX + 20,
-		menuY + 105
-	);
+    ctx.textBaseline = "middle";
+    ctx.textAlign = "left";
 
-	ctx.fillText(
-		"TIRES " + car.tires + "%",
-		menuX + 20,
-		menuY + 140
-	);
+    ctx.fillText(
+        "ENGINE " + car.engine + "%",
+        menuX + 20,
+        menuY + 70
+    );
 
-	ctx.fillText(
-		"OIL " + car.oil + "%",
-		menuX + 20,
-		menuY + 175
-	);
+    ctx.fillText(
+        "BATTERY " + car.battery + "%",
+        menuX + 20,
+        menuY + 105
+    );
 
-	ctx.textBaseline = "alphabetic";
+    ctx.fillText(
+        "TIRES " + car.tires + "%",
+        menuX + 20,
+        menuY + 140
+    );
+
+    ctx.fillText(
+        "OIL " + car.oil + "%",
+        menuX + 20,
+        menuY + 175
+    );
+
+    ctx.textBaseline = "alphabetic";
 }
+
+// ========================================
+// REPAIR BUTTON
+// ========================================
 
 function drawButton() {
 
-	ctx.fillStyle = "#050505";
+    const buttonHovered =
+        mouseX >= menuX &&
+        mouseX <= menuX + menuWidth &&
+        mouseY >= menuY &&
+        mouseY <= menuY + buttonHeight;
 
-	ctx.fillRect(
-		menuX,
-		menuY,
-		menuWidth,
-		buttonHeight
-	);
+    ctx.fillStyle =
+        buttonHovered
+            ? "#202020"
+            : "#050505";
 
-	ctx.fillStyle = "#ffffff";
+    ctx.fillRect(
+        menuX,
+        menuY,
+        menuWidth,
+        buttonHeight
+    );
 
-	ctx.font = "bold 16px 'Press Start 2P', monospace";
-	ctx.textBaseline = "middle";
+    ctx.fillStyle = "#ffffff";
 
-	ctx.fillText(
-		"REPAIR ENGINE",
-		menuX + 20,
-		menuY + buttonHeight / 2
-	);
+    ctx.font =
+        "bold 16px 'Press Start 2P', monospace";
 
-	ctx.textBaseline = "alphabetic";
+    ctx.textBaseline = "middle";
+    ctx.textAlign = "left";
+
+    ctx.fillText(
+        car.engine >= 100
+            ? "ENGINE FULL"
+            : "REPAIR ENGINE",
+        menuX + 20,
+        menuY + buttonHeight / 2
+    );
+
+    ctx.textBaseline = "alphabetic";
 }
 
+// ========================================
+// INTERACTION PROMPT
+// ========================================
+
+function drawInteractionPrompt() {
+
+    if (
+        gameState !== "walking" ||
+        !nearCar()
+    ) {
+        return;
+    }
+
+    ctx.fillStyle = "#ffffff";
+
+    ctx.font =
+        "bold 14px 'Press Start 2P', monospace";
+
+    ctx.textAlign = "center";
+
+    ctx.fillText(
+        "PRESS E",
+        car.x,
+        car.y - car.height / 2 - 20
+    );
+
+    ctx.textAlign = "left";
+}
+
+// ========================================
+// UPDATE
+// ========================================
+
+function update(dt) {
+
+    updatePlayer(dt);
+}
+
+// ========================================
+// DRAW
+// ========================================
 
 function draw() {
 
-	clear();
+    clear();
 
-	if (gameState === "walking" && nearCar()) {
+    drawInteractionPrompt();
 
-		ctx.fillStyle = "#ffffff";
-		ctx.font = "bold 14px 'Press Start 2P', monospace";
-		ctx.textAlign = "center";
+    drawCar(car);
+    drawPlayer(playerPosition);
 
-		ctx.fillText(
-			"PRESS E",
-			car.x,
-			car.y - car.height / 2 - 20
-		);
-
-		ctx.textAlign = "left";
+	if (DEBUG === true) {
+        drawCollisionDebug();
 	}
 
-	checkCollisions();
+    if (gameState === "repairing") {
 
-	drawCar(car);
-	drawPlayer(playerPosition);
-
-	drawCollisionDebug();
-	if (gameState === "repairing") {
-		drawHUD();
-		drawButton();
-	}
-
-	requestAnimationFrame(draw);
+        drawHUD();
+        drawButton();
+    }
 }
 
-draw();
+// ========================================
+// GAME LOOP
+// ========================================
+
+let lastTime = performance.now();
+
+function gameLoop(currentTime) {
+
+    let dt =
+        (currentTime - lastTime) / 1000;
+
+    lastTime = currentTime;
+
+    // Prevent huge jumps after tab switching
+    if (dt > 0.1) {
+        dt = 0.1;
+    }
+
+    update(dt);
+    draw();
+
+    requestAnimationFrame(gameLoop);
+}
+
+// ========================================
+// START GAME
+// ========================================
+
+resizeCanvas();
+
+window.addEventListener(
+    "resize",
+    resizeCanvas
+);
+
+requestAnimationFrame(gameLoop);
+
