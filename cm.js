@@ -1,14 +1,49 @@
-// ========================================
-// SETTINGS
-// ========================================
+ // ========================================
+ // SETTINGS
+ // ========================================
 
 const WIDTH = 1600;
 const HEIGHT = 900;
 const SPEED = 300;
 const REPAIR_AMOUNT = 10;
 const COLLISION_PADDING = 20;
-
 const DEBUG = true;
+
+// ========================================
+// SPRITE ANIMATION SETTINGS
+// ========================================
+
+const FRAME_COUNT = 8;
+const FRAME_DURATION = 0.5;
+
+// Load the 8 separate images for each walking direction.
+// Files are stored in images/player/ as down_01.png, etc.
+
+function loadPlayerFrames(direction) {
+    return Array.from({ length: FRAME_COUNT }, (_, index) => {
+        const image = new Image();
+        const frameNumber = String(index + 1).padStart(2, "0");
+        image.src = `images/player/${direction}_${frameNumber}.png`;
+        return image;
+    });
+}
+
+const playerFrames = {
+    down: loadPlayerFrames("down"),
+    left: loadPlayerFrames("left"),
+    right: loadPlayerFrames("right"),
+    up: loadPlayerFrames("up")
+};
+
+const idleImage = new Image();
+idleImage.src = "images/player/idle.png";
+
+const playerAnimation = {
+    frame: 0,
+    direction: "down",
+    timer: 0,
+    moving: false
+};
 
 // ========================================
 // CANVAS
@@ -25,9 +60,6 @@ ctx.imageSmoothingEnabled = false;
 // ========================================
 // IMAGES
 // ========================================
-
-const playerImage = new Image();
-playerImage.src = "images/player.png";
 
 const carImage = new Image();
 carImage.src = "images/car.png";
@@ -222,11 +254,16 @@ function nearCar() {
 }
 
 // ========================================
-// PLAYER MOVEMENT
+// PLAYER MOVEMENT AND ANIMATION
 // ========================================
 
 function movePlayer(dt) {
-    if (gameState !== "walking") return;
+    if (gameState !== "walking") {
+        playerAnimation.moving = false;
+        playerAnimation.frame = 0;
+        playerAnimation.timer = 0;
+        return;
+    }
 
     let dx = 0;
     let dy = 0;
@@ -236,9 +273,26 @@ function movePlayer(dt) {
     if (keys.a) dx -= 1;
     if (keys.d) dx += 1;
 
-    // Do nothing if no key is pressed.
+    // Stop the walking animation when standing still.
 
-    if (dx === 0 && dy === 0) return;
+    if (dx === 0 && dy === 0) {
+        playerAnimation.moving = false;
+        playerAnimation.frame = 0;
+        playerAnimation.timer = 0;
+        return;
+    }
+
+    playerAnimation.moving = true;
+
+    // Select the correct set of walking frames.
+
+    if (Math.abs(dx) > Math.abs(dy)) {
+        // Horizontal movement.
+        playerAnimation.direction = dx < 0 ? "left" : "right";
+    } else {
+        // Vertical movement.
+        playerAnimation.direction = dy < 0 ? "up" : "down";
+    }
 
     // Keep diagonal movement at the same speed.
 
@@ -264,6 +318,26 @@ function movePlayer(dt) {
 
     if (collides()) {
         player.y -= moveY;
+    }
+
+    // Do not animate if the player cannot move at all.
+
+    if (moveX === 0 && moveY === 0) {
+        playerAnimation.moving = false;
+        playerAnimation.frame = 0;
+        playerAnimation.timer = 0;
+        return;
+    }
+
+    // Advance the walking animation.
+
+    playerAnimation.timer += dt;
+
+    if (playerAnimation.timer >= FRAME_DURATION) {
+        playerAnimation.timer -= FRAME_DURATION;
+
+        playerAnimation.frame =
+            (playerAnimation.frame + 1) % FRAME_COUNT;
     }
 }
 
@@ -380,6 +454,39 @@ function drawImage(image, x, y, width, height) {
 }
 
 // ========================================
+// DRAW ANIMATED PLAYER
+// ========================================
+
+function drawPlayer() {
+    // Use idle.png whenever the player is not walking.
+
+    const image = playerAnimation.moving
+        ? playerFrames[playerAnimation.direction][playerAnimation.frame]
+        : idleImage;
+
+    // Wait until the selected image has loaded.
+
+    if (!image || !image.complete || image.naturalWidth === 0) {
+        return;
+    }
+
+    // These are drawing dimensions, not collision dimensions.
+
+    const drawWidth = 96;
+    const drawHeight = 118;
+
+    // player.x and player.y are the character's center.
+
+    ctx.drawImage(
+        image,
+        player.x - drawWidth / 2,
+        player.y - drawHeight / 2,
+        drawWidth,
+        drawHeight
+    );
+}
+
+// ========================================
 // DEBUG OUTLINES
 // ========================================
 
@@ -402,7 +509,7 @@ function drawDebug() {
         );
     }
 
-    // Red outline for player.
+    // Red outline for player collision box.
 
     ctx.strokeStyle = "red";
 
@@ -541,13 +648,9 @@ function draw() {
         car.height
     );
 
-    drawImage(
-        playerImage,
-        player.x,
-        player.y,
-        player.width,
-        player.height
-    );
+    // Draw the currently selected player image.
+
+    drawPlayer();
 
     drawPrompt();
     drawDebug();
